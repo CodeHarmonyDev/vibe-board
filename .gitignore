@@ -66,7 +66,7 @@ coverage/
 .storybook-out
 
 .env
-packages/**/dist
+apps/**/dist
 
 build-npm-package-codesign.sh
 
@@ -78,7 +78,7 @@ vibe-kanban-*.tgz
 .dev-ports.json
 
 dev_assets
-/packages/web/.env.sentry-build-plugin
+/apss/web/.env.sentry-build-plugin
 .ssh
 
 vibe-kanban-cloud/
