@@ -7,13 +7,21 @@ Migrate backend control/data plane from Rust services to Convex while preserving
 - Local execution capabilities (git/worktree/shell/PTY)
 - Security invariants and failure safety
 - Auth migration to Clerk without regressions in access control
+- No local API server dependency in target runtime
 
 This plan assumes a hybrid architecture:
 - Convex = authoritative state and API/query/mutation/subscription plane
-- Local runner = privileged local execution plane
+- Local runner (Go) = privileged local execution plane
+- ElectricSQL is removed from target architecture
 
 Related auth-focused plan:
 - `migration-auth.md` (Clerk migration track)
+
+Related workspace-focused plan:
+- `migration-workspaces.md` (workspace UX/domain parity across Convex + Web + Go runner)
+
+Related MCP-focused plan:
+- `migration-mcp.md` (external MCP contract compatibility + Convex/Go implementation)
 
 ## 2) Program structure
 
@@ -31,6 +39,7 @@ Acceptance criteria:
 - [ ] Define auth strategy (token verification, identity mapping, org/user boundaries).
 - [ ] Add strict schema validators for all public functions.
 - [ ] Establish internal/public function boundaries (`internal*` vs public APIs).
+- [ ] Replace local API realtime responsibilities with Convex subscriptions (no local API backend).
 
 Acceptance criteria:
 - Convex functions compile with explicit args/returns validators.
@@ -56,8 +65,8 @@ Acceptance criteria:
 - Full data import with deterministic counts/checksums.
 - Query latency acceptable for key list/detail endpoints.
 
-### Phase 3: Local runner protocol
-- [ ] Define typed protocol between Convex and local runner:
+### Phase 3: Go local runner protocol
+- [ ] Define typed protocol between Convex and Go local runner:
 - execution start/stop
 - log streaming
 - diff/stat updates
@@ -65,20 +74,50 @@ Acceptance criteria:
 - approvals/questions
 - [ ] Implement heartbeat and lease ownership for running executions.
 - [ ] Implement retry semantics and dedup keys for command dispatch.
+- [ ] Implement Go local runner service for command execution, git orchestration, PTY, and streaming adapters.
+- [ ] Enforce outbound-only runner connectivity (no public inbound execution endpoint).
 
 Acceptance criteria:
 - Runner reconnect/restart does not duplicate execution side effects.
 - In-flight executions recover to correct terminal state.
+
+### Phase 3A: Device trust and execution authorization
+- [ ] Implement device enrollment (`device_id`) bound to Clerk identity.
+- [ ] Require Convex-side authorization checks before enqueueing executable jobs.
+- [ ] Require `target_device_id` on execution jobs and enforce runner-side match.
+- [ ] Implement command schema allowlist by operation type.
+- [ ] Add job TTL + nonce/idempotency to prevent replay execution.
+- [ ] Add local approval gates for high-risk operation classes.
+- [ ] Implement device/session revocation path and immediate execution stop on revocation.
+
+Acceptance criteria:
+- Unauthorized API calls cannot trigger command execution on unowned devices.
+- Replayed or stale jobs are rejected deterministically.
+- Revoked device sessions cannot consume new jobs.
 
 ### Phase 4: Workspace/worktree lifecycle parity
 - [ ] Port workspace create/ensure/delete orchestration state to Convex.
 - [ ] Preserve multi-repo workspace semantics.
 - [ ] Preserve cleanup safety rules (`.vibe-kanban-workspaces` subdir behavior for custom workspace dirs).
 - [ ] Preserve orphan/expired workspace cleanup policies.
+- [ ] Implement workspace archive/delete semantics explicitly (soft vs hard behavior).
 
 Acceptance criteria:
 - Worktree creation and cleanup remain race-safe.
 - No destructive cleanup beyond managed directories.
+
+### Phase 4A: Workspace UX parity (Convex + Web + Go)
+- [ ] Execute all required behaviors in `migration-workspaces.md`.
+- [ ] Preserve workspace creation flow (project/repo/branch/provider/mode + first session boot).
+- [ ] Preserve repository panel semantics (enabled repos, active repo routing, per-repo status).
+- [ ] Preserve session panel semantics (multi-session history and switching).
+- [ ] Preserve chat semantics (queued follow-up while running, approvals, retry/edit).
+- [ ] Preserve slash command and command-bar behavior for primary workflows.
+- [ ] Preserve changes panel + git operation workflows (commit/push/PR/attach).
+
+Acceptance criteria:
+- Workspace UI behavior is functionally equivalent for core workflows.
+- Convex state and Go runner behavior align with UI expectations under retries/restarts.
 
 ### Phase 5: Execution lifecycle parity
 - [ ] Port execution state machine and transitions.
@@ -100,8 +139,19 @@ Acceptance criteria:
 - Frontend works end-to-end without breaking regressions.
 - MCP tools continue functioning with equivalent semantics.
 
+### Phase 6A: MCP compatibility and tool-contract parity
+- [ ] Execute all checklist items in `migration-mcp.md`.
+- [ ] Preserve local stdio MCP workflow for external clients (Raycast/Claude Desktop/VS Code MCP clients).
+- [ ] Implement documented MCP tool vocabulary compatibility (`*_task` contract) with alias/version strategy for existing issue-based tools.
+- [ ] Support both `start_workspace_session` request shapes during migration (`task_id` shape and legacy title/prompt shape).
+- [ ] Preserve context-sensitive `get_context` semantics.
+
+Acceptance criteria:
+- MCP clients can execute the documented plan->tasks->workspace execution workflow without regressions.
+- Existing MCP clients using current Rust-era tool names continue to work during migration window.
+
 ### Phase 7: Git/PR and remote sync parity
-- [ ] Keep mutable git operations in local runner.
+- [ ] Keep mutable git operations in Go local runner.
 - [ ] Port PR metadata lifecycle to Convex documents.
 - [ ] Port PR monitor logic (polling/status transitions/archive behavior).
 - [ ] Port remote sync triggers and idempotency protections.
@@ -173,6 +223,8 @@ Acceptance criteria:
 - [ ] Signed/validated command envelopes.
 - [ ] Idempotency keys for start/stop/append log actions.
 - [ ] Lease renewal + orphan execution sweeper.
+- [ ] Go binary packaging and cross-platform release pipeline (macOS/Linux/Windows).
+- [ ] Runner executes only typed allowlisted commands, never raw arbitrary shell payloads.
 
 ### F) OAuth and remote bridge
 - [ ] Secure token verification boundaries.
@@ -184,17 +236,40 @@ Acceptance criteria:
 - [ ] Remove legacy OAuth handoff endpoints from active path.
 - [ ] Confirm frontend, MCP, and runner interactions are Clerk-compatible.
 
+### H) Workspace domain parity
+- [ ] Execute all checklist items in `migration-workspaces.md`.
+- [ ] Implement command routing semantics (active-repo default targeting and explicit repo-prefixed overrides).
+- [ ] Implement durable queue + approvals for chat/execution continuity.
+- [ ] Implement archive/unarchive discoverability and delete safety confirmations.
+- [ ] Ensure workspace status model covers `running`, `idle`, `needs_attention`, `error` (or mapped equivalents).
+- [ ] Ensure command bar and slash commands are wired to Convex mutations with authz checks.
+
+### I) MCP compatibility parity
+- [ ] Execute all checklist items in `migration-mcp.md`.
+- [ ] Implement MCP tool aliasing/versioning strategy and publish compatibility matrix.
+- [ ] Preserve local-only MCP execution model (no public inbound MCP endpoint).
+- [ ] Implement Clerk-authenticated MCP session identity bound to Convex authz checks.
+- [ ] Enforce device-target execution authorization for MCP-triggered workspace runs.
+- [ ] Add audit logs for privileged MCP operations and execution dispatch.
+
 ## 4) Testing matrix (must-pass)
 
 ### Functional
 - [ ] Create workspace (single-repo + multi-repo).
+- [ ] Create workspace with branch conflict handling and deterministic failure behavior.
 - [ ] Setup scripts (parallel/sequential) and coding action chain.
 - [ ] Follow-up and queued follow-up.
 - [ ] Session reset to process.
+- [ ] Multi-session switching preserves isolated history/context.
+- [ ] Active-repo and repo-prefixed command routing are correct.
+- [ ] Slash commands and command bar trigger expected actions.
+- [ ] Archive/unarchive/delete workspace semantics match expected policy.
 - [ ] PR create/attach/comments/merged archive path.
 - [ ] Scratch create/update/delete/stream.
 - [ ] Image upload/serve/delete and workspace image association.
 - [ ] Terminal WS create/input/resize/close.
+- [ ] MCP documented workflow works end-to-end (plan -> create tasks -> start workspace session).
+- [ ] MCP tool compatibility covers both documented `*_task` names and legacy issue-based names during migration period.
 
 ### Concurrency and race conditions
 - [ ] Concurrent `ensure_workspace_exists` for same workspace.
@@ -212,6 +287,10 @@ Acceptance criteria:
 - [ ] Path traversal attempts for image serving.
 - [ ] Unauthorized approval responses.
 - [ ] Token forgery/malformed token scenarios.
+- [ ] Unauthorized Convex mutation attempts cannot trigger local command execution.
+- [ ] Cross-device execution attempts are rejected (`target_device_id` mismatch).
+- [ ] Unauthorized MCP client/tool calls cannot trigger local execution.
+- [ ] MCP replayed execution requests are rejected via nonce/TTL/idempotency checks.
 
 ### Data integrity
 - [ ] Imported entity count match (SQLite vs Convex).
@@ -242,4 +321,6 @@ Migration is complete only if all are true:
 - [ ] Security review sign-off complete.
 - [ ] Observability and on-call runbooks updated.
 - [ ] MCP and frontend compatibility confirmed.
+- [ ] Workspace parity checklist in `migration-workspaces.md` is complete.
+- [ ] MCP parity checklist in `migration-mcp.md` is complete.
 - [ ] Rollback drill executed successfully.

@@ -6,6 +6,12 @@ This document analyzes the Rust backend surface in `crates/` for migration plann
 Related auth-focused plan:
 - `migration-auth.md` (Clerk migration track)
 
+Workspace parity specification:
+- `migration-workspaces.md` (canonical workspace behavior for Convex + Web + Go runner)
+
+MCP integration specification:
+- `migration-mcp.md` (external MCP contract + Convex/Go implementation requirements)
+
 ### In-scope crates
 - `crates/server`
 - `crates/deployment`
@@ -320,6 +326,27 @@ On login, background sync pushes linked workspace/PR state to remote via `remote
 
 Implication: Backend API compatibility is part of migration scope even if internal implementation changes.
 
+### 12.1 Public MCP docs contract (2026-02-17 page revision)
+Source:
+- `https://www.vibekanban.com/docs/integrations/vibe-kanban-mcp-server`
+
+Documented external contract highlights:
+- MCP server is local-only and launched from client config using `npx -y vibe-kanban@latest --mcp`.
+- Documented tool vocabulary includes task-oriented names:
+- `list_tasks`, `create_task`, `get_task`, `update_task`, `delete_task`
+- `start_workspace_session` documented with `task_id` + `executor` + `repos`
+- Documented executor set includes `claude-code`, `amp`, `gemini`, `codex`, `opencode`, `cursor_agent`, `qwen-code`, `copilot`, `droid`.
+
+### 12.2 Observed mismatch with current Rust MCP implementation
+Current Rust MCP implementation in `crates/mcp` exposes mostly issue-oriented tools and different execution args:
+- Uses `list_issues`/`create_issue`/`update_issue` etc. rather than `*_task` names.
+- `start_workspace_session` accepts `title` + prompt (or `issue_id`) and does not require `task_id`.
+- `list_repos` implementation is global (no project-scoped argument).
+
+Migration requirement:
+- Convex + Go MCP migration must include an explicit compatibility strategy (aliases/versioning) instead of assuming current tool names/params already match published docs.
+- Detailed plan is in `migration-mcp.md`.
+
 ## 13) Security and reliability findings (Rust baseline)
 
 ### Finding A: JWT claims parsed with insecure decode
@@ -348,7 +375,7 @@ Migration requirement:
 
 Migration requirement:
 - Convex side must not attempt to execute untrusted shell scripts.
-- Keep local runner with explicit approvals/sandbox controls.
+- Keep Go local runner with explicit approvals/sandbox controls.
 
 ### Finding D: Approvals are in-memory
 - Approval lifecycle state is runtime memory; restart loses pending requests.
@@ -372,6 +399,11 @@ Migration opportunity:
 
 These require a local sidecar/agent runner service, with Convex as state/control plane.
 
+Target architecture decision:
+- No local Rust API server in target runtime.
+- Convex is the primary API + realtime backend for the local frontend.
+- ElectricSQL is not required in target architecture.
+
 ### 14.2 Required control-plane capabilities in Convex
 Convex must own at least:
 - Durable source of truth for entities/state transitions
@@ -380,7 +412,7 @@ Convex must own at least:
 - Approval and queue durability
 - API shape compatibility for frontend and MCP tools
 
-### 14.3 Local runner responsibilities after migration
+### 14.3 Local runner responsibilities after migration (Go)
 - Execute scripts/agents on developer machine
 - Manage worktree/container_ref physical directories
 - Stream logs/diff metadata to Convex
@@ -405,6 +437,7 @@ Must preserve or provide controlled migration path for:
 - `/api/scratch/*`
 - `/api/repos/*`
 - `/api/remote/*` bridge endpoints (if still needed)
+- MCP tool contract used by external clients (see `migration-mcp.md`)
 
 ## 16) Domain model mapping candidates (Rust -> Convex)
 
@@ -434,6 +467,15 @@ Must preserve or provide controlled migration path for:
 - Workspace cleanup safety rules (never over-delete user directories).
 - Image path traversal protections and canonical path checks.
 - Origin validation policy for API routes.
+- Workspace creation semantics: git worktree-per-repo isolation on workspace branch.
+- Workspace lifecycle semantics: archive (soft) vs delete (hard) behavior.
+- Repository targeting semantics: active repo + explicit repo-prefixed commands.
+- Command UX parity: slash commands and command-bar action coverage.
+- Chat queue/approval semantics: messages queued while running and durable approval lifecycle.
+
+### 17.1 Product-doc parity track
+The detailed end-user workspace behavior contract (creation, management, sessions, chat, slash commands, command bar, multi-repo sessions, changes, and git operations) is tracked in:
+- `migration-workspaces.md`
 
 ## 18) Notable technical debt discovered
 - Migration service still depends on `workspace.task_id` chains; this legacy coupling should be retired in Convex-native model.
@@ -445,12 +487,30 @@ Must preserve or provide controlled migration path for:
 
 ### Recommended target split
 - Convex: authoritative data model, API/query/mutation layer, durable workflow states, subscriptions.
-- Local runner service (Node/Rust sidecar): executes local git/shell/PTY workloads and reports state/logs back to Convex.
+- Local runner service (Go sidecar): executes local git/shell/PTY workloads and reports state/logs back to Convex.
 
 ### Why this split
 - Matches Convex strengths (state + realtime + transactions).
 - Avoids forcing unsupported local compute semantics into Convex runtime.
 - Preserves existing UX/workflow model while reducing backend complexity over time.
+
+### 19.1 Go runner connectivity model (required)
+- Go runner is outbound-only: it initiates connections to Convex and polls/subscribes for assigned work.
+- No public inbound command endpoint is exposed on localhost or LAN for execution control.
+- Local frontend sends execution intent to Convex; Convex authorizes and enqueues; runner consumes only authorized device-targeted jobs.
+
+### 19.2 Trust and execution security model (required)
+To prevent unauthorized Convex API requests from triggering local execution:
+- Every execution request must be bound to:
+- authenticated Clerk principal (`user_id`, `org_id`)
+- target `device_id`
+- policy-validated command type
+- Convex mutations that enqueue execution must enforce role + ownership checks.
+- Runner must only execute jobs where `target_device_id` equals its own enrolled device identity.
+- Use strict command schema and allowlist (no arbitrary shell from raw user input).
+- Use job TTL, nonce/idempotency key, and status state machine to prevent replay.
+- Add local confirmation/approval gates for high-risk operations (force-push, destructive git ops, external command classes).
+- Support immediate device revocation and token/session invalidation.
 
 ## 20) Definition of done for parity/security
 The migration should only be considered complete when:

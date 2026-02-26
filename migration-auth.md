@@ -17,8 +17,9 @@ Implication:
 Target model:
 - Clerk is the identity provider.
 - Convex validates Clerk identity and enforces authorization in queries/mutations/actions.
-- Local runner uses short-lived, scoped tokens/session handoff from Convex-facing app layer.
+- Go local runner uses short-lived, scoped tokens/session handoff from Convex-facing app layer.
 - Remove dependency on custom handoff endpoints and refresh-token file persistence for app auth.
+- No local API server in target auth architecture; frontend talks to Convex directly.
 
 ## 4) Non-negotiable security requirements
 - No trust in unverified token claims for authorization decisions.
@@ -33,11 +34,13 @@ Target model:
 - Define Clerk user mapping to local domain entities (user, org/member, workspace access).
 - Define active org/tenant resolution strategy.
 - Define service-to-service or machine token needs for runner interactions.
+- Define device enrollment model (`device_id`) bound to Clerk user/org context.
 
 ### B) Backend auth middleware/policies
 - Replace current OAuth auth routes with Clerk-compatible auth endpoints/flows.
 - Add centralized auth guard utilities for Convex functions.
 - Add role/permission checks for org/workspace/session operations.
+- Enforce authorization checks before any execution job can be enqueued for a device.
 
 ### C) Token lifecycle and storage
 - Remove local refresh-token persistence for app auth path.
@@ -49,7 +52,14 @@ Target model:
 - Update MCP/backend bridge calls to use Clerk-authenticated context.
 - Ensure API compatibility where clients expect `/auth/status`-like semantics.
 
-### E) Migration/cutover
+### E) Runner trust and execution authorization
+- Use device-targeted execution requests (`target_device_id`).
+- Runner consumes only jobs for its enrolled device identity.
+- Add local approval requirement for high-risk command categories.
+- Add replay protections (TTL + nonce/idempotency).
+- Add immediate revocation path for device/session compromise.
+
+### F) Migration/cutover
 - Support dual-auth period (legacy + Clerk) behind feature flags.
 - Add user/org mapping migration for existing accounts.
 - Add rollback guard for auth outage or permission regressions.
@@ -60,7 +70,9 @@ Target model:
 - [ ] Implement authz helpers (org membership, role checks, workspace visibility).
 - [ ] Port/replace existing auth status/user endpoints with Clerk-backed equivalents.
 - [ ] Update frontend login/session/logout flows to Clerk.
-- [ ] Update local runner command authorization handshake to Clerk-aware model.
+- [ ] Update Go local runner command authorization handshake to Clerk-aware model.
+- [ ] Enforce `target_device_id` authorization in Convex execution mutations.
+- [ ] Enforce runner-side device identity verification before command execution.
 - [ ] Remove legacy OAuth handoff flow and credential file dependency.
 - [ ] Add audit events for auth success/failure and privileged action checks.
 - [ ] Add feature flag for phased rollout.
@@ -77,6 +89,8 @@ Target model:
 - [ ] Expired/invalid token rejection.
 - [ ] Cross-org access attempts blocked.
 - [ ] Privileged operations denied without required role.
+- [ ] Unauthorized execution enqueue requests blocked.
+- [ ] Cross-device execution attempts blocked.
 
 ### Reliability
 - [ ] Session continuity across app reloads.
@@ -89,4 +103,3 @@ Target model:
 - All sensitive APIs enforce authn/authz correctly.
 - Existing workspace/session/execution features remain functional.
 - Migration and rollback procedures are documented and tested.
-

@@ -7,3 +7,5 @@ Detailed docs:
 - [migration-finding.md](./migration-finding.md)
 - [migration-task.md](./migration-task.md)
 - [migration-auth.md](./migration-auth.md)
+- [migration-workspaces.md](./migration-workspaces.md)
+- [migration-mcp.md](./migration-mcp.md)
