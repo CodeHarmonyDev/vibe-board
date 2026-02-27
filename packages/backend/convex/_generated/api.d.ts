@@ -8,13 +8,27 @@
  * @module
  */
 
+import type * as approvals from "../approvals.js";
+import type * as executionProcesses from "../executionProcesses.js";
+import type * as queuedMessages from "../queuedMessages.js";
+import type * as sessions from "../sessions.js";
+import type * as workspaceRepos from "../workspaceRepos.js";
+import type * as workspaces from "../workspaces.js";
+
 import type {
   ApiFromModules,
   FilterApi,
   FunctionReference,
 } from "convex/server";
 
-declare const fullApi: ApiFromModules<{}>;
+declare const fullApi: ApiFromModules<{
+  approvals: typeof approvals;
+  executionProcesses: typeof executionProcesses;
+  queuedMessages: typeof queuedMessages;
+  sessions: typeof sessions;
+  workspaceRepos: typeof workspaceRepos;
+  workspaces: typeof workspaces;
+}>;
 
 /**
  * A utility for referencing Convex functions in your app's public API.
